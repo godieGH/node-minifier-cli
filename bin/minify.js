@@ -6,7 +6,7 @@ const path = require('path');
 const { traverseAndMinifyDirectory } = require('../src/minifier'); // Adjust path if needed
 
 program
-  .version('1.0.0') // Your package version
+  .version('1.0.2') // Your package version
   .name('minifier')
   .description('Minifies .js, .css, and .html files recursively in a specified path.')
   .argument('<path>', 'The path to the directory or file to minify.')
