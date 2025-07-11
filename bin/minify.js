@@ -29,7 +29,8 @@ program
   .description('Minifies .js, .css, and .html files recursively in a specified path, with ignore capabilities.')
   .argument('<path>', 'The path to the directory or file to minify.')
   .option('-d, --drop-console', 'Drop console.log statements in JavaScript.', false)
-  .option('-m, --mangle', 'Mangle variable and function names in JavaScript.', true)
+  .option('-m, --mangle', 'Mangle variable and function names in JavaScript.', true) // This sets the default to true
+  .option('--no-mangle', 'Do not mangle variable and function names in JavaScript.') // This explicitly creates the --no-mangle option
   .option('--no-collapse-whitespace', 'Do not collapse whitespace in HTML.', true)
   .option('--no-remove-comments', 'Do not remove comments in HTML.', true)
   .option('--no-remove-redundant-attributes', 'Do not remove redundant attributes in HTML.', true)
