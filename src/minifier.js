@@ -1,72 +1,142 @@
-// bin/minify.js
-#!/usr/bin/env node
-
-const { program } = require('commander');
 const fs = require('fs').promises;
 const path = require('path');
-const ignore = require('ignore'); // New dependency
-const { traverseAndMinifyDirectory, processFile } = require('../src/minifier'); // Adjust path as per your project structure
+const { minify: terserMinify } = require('terser');
+const { minify: htmlMinify } = require('html-minifier-terser');
+const postcss = require('postcss');
+const cssnano = require('cssnano');
+const { minimatch } = require('minimatch'); // Import minimatch
 
-program
-  .version('1.1.0') // Updated package version for the new feature
-  .name('minifier')
-  .description('Minifies .js, .css, and .html files recursively in a specified path, respecting ignore patterns from .minifierignore files and --ignore flag.')
-  .argument('<path>', 'The path to the directory or file to minify.')
-  .option('-d, --drop-console', 'Drop console.log statements in JavaScript.', false)
-  .option('-m, --mangle', 'Mangle variable and function names in JavaScript.', true)
-  .option('--no-collapse-whitespace', 'Do not collapse whitespace in HTML.', true) // Default true, so --no- prefix to disable
-  .option('--no-remove-comments', 'Do not remove comments in HTML.', true)
-  .option('--no-remove-redundant-attributes', 'Do not remove redundant attributes in HTML.', true)
-  .option('--no-use-short-doctype', 'Do not replace doctype with short HTML5 doctype in HTML.', true)
-  .option('--no-minify-css', 'Do not minify CSS in <style> tags within HTML.', true)
-  .option('--no-minify-js', 'Do not minify JS in <script> tags within HTML.', true)
-  .option('-i, --ignore <paths>', 'Comma-separated list of files/directories to ignore (e.g., "dist/,node_modules/,file.js"). These patterns are relative to the input path.', (value) => value.split(',').filter(Boolean), [])
-  .action(async (inputPath, options) => {
-    const absolutePath = path.resolve(process.cwd(), inputPath);
+/**
+ * Checks if a file or directory should be ignored based on provided patterns.
+ * @param {string} filePath The absolute path to the file or directory.
+ * @param {string[]} ignorePatterns An array of minimatch patterns to ignore.
+ * @param {string} baseDir The base directory from which the patterns are relative.
+ * @returns {boolean} True if the file/directory should be ignored, false otherwise.
+ */
+function isIgnored(filePath, ignorePatterns, baseDir) {
+  const relativePath = path.relative(baseDir, filePath);
 
-    console.log(`\n--- Starting Minification Process ---`);
-    console.log(`Targeting path: ${absolutePath}`);
-    console.log('Minification Options:', options);
+  // If the path is the base directory itself, we shouldn't ignore it unless explicitly asked.
+  // This helps avoid ignoring the root directory being processed.
+  if (relativePath === '' || relativePath === '.') {
+    return false;
+  }
 
-    // Initialize the global ignore instance with CLI provided patterns.
-    // These patterns are considered relative to the absolutePath provided by the user.
-    const globalIg = ignore();
-    if (options.ignore && options.ignore.length > 0) {
-      globalIg.add(options.ignore);
+  // Normalize paths for consistent matching (e.g., convert backslashes to forward slashes on Windows)
+  const normalizedPath = relativePath.replace(/\\/g, '/');
+
+  for (const pattern of ignorePatterns) {
+    const normalizedPattern = pattern.replace(/\\/g, '/');
+
+    // Handle directory patterns: if pattern ends with '/', it matches directory contents
+    // if the path is a directory and matches the pattern, it should be ignored.
+    // If the path is a file within an ignored directory, it also should be ignored.
+    if (minimatch(normalizedPath, normalizedPattern, { dot: true })) {
+      return true;
     }
 
+    // Handle patterns that specifically target directories
+    if (minimatch(normalizedPath, normalizedPattern + '/**', { dot: true }) && fs.existsSync(filePath) && fs.statSync(filePath).isDirectory()) {
+      return true;
+    }
+  }
+  return false;
+}
+
+async function processFile(filePath, options) {
+  const ext = path.extname(filePath).toLowerCase();
+  let content;
+
+  // Check if the file should be ignored
+  if (options.ignorePatterns && isIgnored(filePath, options.ignorePatterns, options.basePath)) {
+    console.log(`Ignoring (matches ignore pattern): ${path.relative(process.cwd(), filePath)}`);
+    return;
+  }
+
+  try {
+    content = await fs.readFile(filePath, 'utf8');
+  } catch (readError) {
+    console.error(`Failed to read file ${filePath}: ${readError.message}`);
+    return;
+  }
+
+  let minifiedContent = content;
+  let minified = false;
+
+  try {
+    if (ext === '.js') {
+      const result = await terserMinify(content, {
+        compress: {
+          drop_console: options.dropConsole,
+        },
+        mangle: options.mangle,
+      });
+      if (result.error) throw result.error;
+      minifiedContent = result.code;
+      minified = true;
+    } else if (ext === '.css') {
+      const result = await postcss([cssnano]).process(content, { from: filePath, to: filePath });
+      minifiedContent = result.css;
+      minified = true;
+    } else if (ext === '.html') {
+      minifiedContent = await htmlMinify(content, {
+        collapseWhitespace: options.collapseWhitespace,
+        removeComments: options.removeComments,
+        removeRedundantAttributes: options.removeRedundantAttributes,
+        useShortDoctype: options.useShortDoctype,
+        minifyCSS: options.minifyCss,
+        minifyJS: options.minifyJs,
+      });
+      minified = true;
+    }
+
+    if (minified) {
+      await fs.writeFile(filePath, minifiedContent, 'utf8');
+      console.log(`Minified and overwritten: ${path.relative(process.cwd(), filePath)}`);
+    } else {
+      console.log(`Skipping (no minification applied): ${path.relative(process.cwd(), filePath)}`);
+    }
+
+  } catch (minifyError) {
+    console.error(`Error minifying ${path.relative(process.cwd(), filePath)}: ${minifyError.message}`);
+  }
+}
+
+async function traverseAndMinifyDirectory(directory, options) {
+  // Check if the directory itself should be ignored
+  if (options.ignorePatterns && isIgnored(directory, options.ignorePatterns, options.basePath)) {
+    console.log(`Ignoring directory (matches ignore pattern): ${path.relative(process.cwd(), directory)}`);
+    return;
+  }
+
+  let files;
+  try {
+    files = await fs.readdir(directory);
+  } catch (readDirError) {
+    console.error(`Failed to read directory ${directory}: ${readDirError.message}`);
+    return;
+  }
+
+  for (const file of files) {
+    const filePath = path.join(directory, file);
+    let stat;
     try {
-      const stat = await fs.stat(absolutePath);
-
-      if (stat.isDirectory()) {
-        await traverseAndMinifyDirectory(absolutePath, options, globalIg, absolutePath);
-      } else if (stat.isFile()) {
-        // For a single file, the ignore patterns from the CLI are relative to the file's own directory
-        // or can match its basename.
-        const relativeSelfPath = path.relative(absolutePath, absolutePath); // This will typically be '.' or ''
-        const fileName = path.basename(absolutePath);
-
-        // Check if the single file is ignored by the global CLI ignore patterns.
-        // We check against its relative path (e.g., '.') and its base name.
-        if (globalIg.ignores(relativeSelfPath) || globalIg.ignores(fileName)) {
-            console.log(`Ignoring single file as per CLI ignore rules: ${path.relative(process.cwd(), absolutePath)}`);
-            process.exit(0); // Exit gracefully if the single file is ignored
-        }
-        // If not ignored, process the single file
-        await processFile(absolutePath, options);
-      } else {
-        console.error(`Error: The path '${inputPath}' is not a valid file or directory.`);
-        process.exit(1);
-      }
-    } catch (checkPathError) {
-      if (checkPathError.code === 'ENOENT') {
-        console.error(`Error: The path '${inputPath}' does not exist.`);
-      } else {
-        console.error(`Error checking path '${inputPath}': ${checkPathError.message}`);
-      }
-      process.exit(1);
+      stat = await fs.stat(filePath);
+    } catch (statError) {
+      console.error(`Failed to get stat for ${filePath}: ${statError.message}`);
+      continue;
     }
-    console.log('\n--- Minification Complete. ---');
-  });
 
-program.parse(process.argv);
+    if (stat.isDirectory()) {
+      await traverseAndMinifyDirectory(filePath, options);
+    } else {
+      const ext = path.extname(filePath).toLowerCase();
+      if (['.js', '.css', '.html'].includes(ext)) {
+        await processFile(filePath, options);
+      }
+    }
+  }
+}
+
+// Export the main function that the CLI will call
+module.exports = { traverseAndMinifyDirectory, processFile, isIgnored }; // Export isIgnored for testing if needed
