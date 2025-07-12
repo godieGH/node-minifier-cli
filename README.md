@@ -148,6 +148,9 @@ The following table details all available options for customizing the minificati
 |  | --ignore-path `<file>` | Path to a custom `.minifierignore` file. Looks for `.minifierignore` in the target path's directory by default. | N/A | N/A |
 |  -s | --source-map | create a source map file for your minified file (css, js) to simplify brower debuging | false | N/A |
 |  | --source-map-dir `<path>` | Specify where to save your map files, If don't used `minifier` will save the the map file to where the minified file is saved | (Save where minified file is saved) | N/A |
+| -o `<path>` | --output-dir `<path>` | Specify an output directory for minified files, relative or absolute. Can include a renaming pattern (e.g., `"**/*.min.js"`). | overwrite | N/A |
+|  | --dry-run | Simulate minification without writing any files, just to see what files would be minified | false | N/A |
+|  | --no-verbose | Disable verbose logging for detailed output. | true | N/A |
 
 ## Ignore Patterns Reference
 
