@@ -1,5 +1,6 @@
 const fs = require('fs').promises;
 const path = require('path');
+const { Table } = require('console-table-printer');
 const { minify: terserMinify } = require('terser');
 const { minify: htmlMinify } = require('html-minifier-terser');
 const postcss = require('postcss');
@@ -295,8 +296,9 @@ async function traverseAndMinifyDirectory(directory, options, results) {
   }
 }
 
+
 /**
- * Displays the minification results in a formatted table.
+ * Displays the minification results in a formatted table using console-table-printer.
  * @param {Array} results An array of results from processed files.
  */
 function displayResultsTable(results) {
@@ -313,97 +315,62 @@ function displayResultsTable(results) {
     // Handle both Windows and Unix paths
     const parts = fullPath.split(path.sep).filter(p => p !== '');
     if (parts.length > 2) { // If there are more than two directory levels (e.g., dir1/dir2/file.js)
-        return `.../${parts[parts.length - 2]}/${parts[parts.length - 1]}`;
+      return `.../${parts[parts.length - 2]}/${parts[parts.length - 1]}`;
     } else if (parts.length === 2) { // If there's one directory level (e.g., dir1/file.js)
-        return `${parts[0]}/${parts[1]}`; // Still show the directory and file
+      return `${parts[0]}/${parts[1]}`; // Still show the directory and file
     }
     return fullPath; // For simple filenames or paths like 'file.js' or './file.js'
   };
 
+  const p = new Table({
+    columns: [
+      { name: 'File', alignment: 'left', color: 'cyan', minLen: 15 }, // minLen helps ensure minimum width
+      { name: 'Status', alignment: 'center', color: 'white', minLen: 10 },
+      { name: 'Original Size', alignment: 'right', color: 'green', minLen: 10 },
+      { name: 'Minified Size', alignment: 'right', color: 'green', minLen: 10 },
+      { name: 'Reduction', alignment: 'right', color: 'yellow', minLen: 12 },
+      { name: 'Output File', alignment: 'left', color: 'magenta', minLen: 15 },
+      { name: 'Source Map', alignment: 'center', color: 'blue', minLen: 8 },
+    ],
+  });
 
-  // Calculate maximum column widths
-  const headers = ['File', 'Status', 'Original Size', 'Minified Size', 'Reduction', 'Output File', 'Source Map'];
-  let maxWidths = headers.map(header => header.length);
-
-  const formattedResults = results.map(r => {
+  results.forEach(r => {
     const originalSizeFormatted = formatBytes(r.originalSize);
     const minifiedSizeFormatted = formatBytes(r.minifiedSize);
     const reductionFormatted = r.reductionPercent > 0 ? `${formatBytes(r.reduction)} (-${r.reductionPercent.toFixed(1)}%)` : 'N/A';
-    const statusDisplay = r.error ? `Error: ${r.error.split('\n')[0]}` : r.status; // Show first line of error
+    const statusDisplay = r.error ? `Error: ${r.error.split('\n')[0]}` : r.status;
 
-    // Apply path collapsing for display
     const fileDisplay = collapsePathForDisplay(r.filePath);
     const outputFileDisplay = collapsePathForDisplay(r.outputFilePath || 'N/A');
 
     let sourceMapDisplay = 'No';
     if (r.sourceMapGenerated) {
-        // Construct the actual source map path from result and then collapse
-        // This assumes sourceMapActualFilePath was set correctly in processFile
-        // For simplicity here, we'll just collapse based on the knowledge that it's usually relative to cwd
-        // If not directly available in 'r', you might need to re-derive it or ensure it's stored.
-        // For now, let's assume `r.sourceMapPath` exists if generated and is the relative path.
-        // If `r.sourceMapActualFilePath` were part of the result, that would be ideal.
-        // For this example, we'll just indicate "Yes" for brevity or extend 'r' in `processFile`
-        // if you need the full path to collapse.
-        // Let's use a placeholder 'Yes' or if you decide to add `sourceMapActualFilePath` to result:
-        // sourceMapDisplay = collapsePathForDisplay(r.sourceMapActualFilePath);
-        sourceMapDisplay = 'Yes'; // Keeping it simple as per original 'Yes'/'No', but could be collapsed path if stored
-        // To collapse the source map path, you'd need the actual path returned in `result` from `processFile`.
-        // Assuming you might add `sourceMapPath: path.relative(process.cwd(), sourceMapActualFilePath)` to the result object in `processFile`.
-        if (r.sourceMapPath) { // If you add this to your result object in processFile
-            sourceMapDisplay = collapsePathForDisplay(r.sourceMapPath);
-        } else {
-             // If sourceMapPath isn't directly in `r`, we'd need to reconstruct or just show 'Yes'
-             sourceMapDisplay = 'Yes'; // Or handle more robustly
-        }
+        // This assumes that `r` might contain a `sourceMapPath` if you added it
+        // to the `result` object in `processFile`. If not, it will default to 'Yes'.
+        // For accurate path display, ensure `processFile` adds `sourceMapPath` to `result`.
+        sourceMapDisplay = r.sourceMapPath ? collapsePathForDisplay(r.sourceMapPath) : 'Yes';
     }
 
-
-    return {
-      file: fileDisplay,
-      status: statusDisplay,
-      originalSize: originalSizeFormatted,
-      minifiedSize: minifiedSizeFormatted,
-      reduction: reductionFormatted,
-      outputFile: outputFileDisplay,
-      sourceMap: sourceMapDisplay,
-    };
+    p.addRow({
+      'File': fileDisplay,
+      'Status': statusDisplay,
+      'Original Size': originalSizeFormatted,
+      'Minified Size': minifiedSizeFormatted,
+      'Reduction': reductionFormatted,
+      'Output File': outputFileDisplay,
+      'Source Map': sourceMapDisplay,
+    });
   });
 
-  formattedResults.forEach(row => {
-    maxWidths[0] = Math.max(maxWidths[0], row.file.length);
-    maxWidths[1] = Math.max(maxWidths[1], row.status.length);
-    maxWidths[2] = Math.max(maxWidths[2], row.originalSize.length);
-    maxWidths[3] = Math.max(maxWidths[3], row.minifiedSize.length);
-    maxWidths[4] = Math.max(maxWidths[4], row.reduction.length);
-    maxWidths[5] = Math.max(maxWidths[5], row.outputFile.length);
-    maxWidths[6] = Math.max(maxWidths[6], row.sourceMap.length);
-  });
+  p.printTable(); // This prints the table to the console
 
-  // Print header
-  const headerLine = headers.map((header, i) => header.padEnd(maxWidths[i])).join(' | ');
-  console.log(headerLine);
-  console.log('-'.repeat(headerLine.length));
-
-  // Print rows
-  formattedResults.forEach(row => {
-    const rowLine = `${row.file.padEnd(maxWidths[0])} | ` +
-                    `${row.status.padEnd(maxWidths[1])} | ` +
-                    `${row.originalSize.padEnd(maxWidths[2])} | ` +
-                    `${row.minifiedSize.padEnd(maxWidths[3])} | ` +
-                    `${row.reduction.padEnd(maxWidths[4])} | ` +
-                    `${row.outputFile.padEnd(maxWidths[5])} | ` +
-                    `${row.sourceMap.padEnd(maxWidths[6])}`;
-    console.log(rowLine);
-  });
-
-  // Optional: Print a summary line at the end
+  // Keep the summary line at the end, as it's separate from the table
   const totalOriginalSize = results.reduce((sum, r) => sum + r.originalSize, 0);
   const totalMinifiedSize = results.reduce((sum, r) => sum + r.minifiedSize, 0);
   const totalReduction = totalOriginalSize - totalMinifiedSize;
   const totalReductionPercent = totalOriginalSize > 0 ? (totalReduction / totalOriginalSize * 100).toFixed(1) : 0;
 
-  console.log('-'.repeat(headerLine.length));
+  console.log('\n' + '-'.repeat(p.table.width)); // Use table's width for separator
   console.log(`Total: ${formatBytes(totalOriginalSize)} -> ${formatBytes(totalMinifiedSize)} (Saved: ${formatBytes(totalReduction)}, -${totalReductionPercent}%)`);
   console.log('--- End Summary ---');
 }
