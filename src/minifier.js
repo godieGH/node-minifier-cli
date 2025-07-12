@@ -16,14 +16,14 @@ const { minimatch } = require('minimatch');
  */
 function isIgnored(filePath, ignorePatterns, baseDir) {
   // ✅ Default patterns to ignore common config files
-   
+
   const DEFAULT_IGNORE_PATTERNS = [
     // General config files (covers Vite, PostCSS, Tailwind, Next.js, etc.)
     '**/*.config.{js,cjs,mjs}',
-    
+
     // RC files (covers ESLint, Babel, Stylelint, Prettier)
     '**/{.,}*rc.{js,cjs,json}',
-    
+
     // Specific build tools
     '**/webpack.*.js',        // For multi-file Webpack configs (e.g., webpack.dev.js)
     '**/gulpfile.{js,mjs}',     // For Gulp
@@ -35,7 +35,7 @@ function isIgnored(filePath, ignorePatterns, baseDir) {
     '**/jest.setup.js',
     '**/playwright.config.js',
     '**/cypress.config.js',
-    
+
     // Other common tools
     '**/babel.config.js',
     '**/eslint.config.js',    // For new ESLint flat config
@@ -103,7 +103,7 @@ async function processFile(filePath, options) {
   };
 
   if (options.ignorePatterns && isIgnored(filePath, options.ignorePatterns, options.basePath)) {
-    if (options.verbose) console.log(`Ignoring (matches pattern): ${relativeFilePath}`);
+    if (options.verbose) console.log(`Ignoring (matches pattern): ${relativeFilePath}`); // Log immediately
     result.status = 'Ignored';
     return result;
   }
@@ -114,7 +114,7 @@ async function processFile(filePath, options) {
   } catch (readError) {
     result.status = 'Error';
     result.error = `Failed to read: ${readError.message}`;
-    console.error(`Failed to read file ${relativeFilePath}: ${readError.message}`); // Keep error logging for immediate feedback
+    console.error(`Failed to read file ${relativeFilePath}: ${readError.message}`); // Log immediately
     return result;
   }
 
@@ -136,14 +136,14 @@ async function processFile(filePath, options) {
     if (outputDirExt && outputDirBase.includes('*')) {
         const parts = options.outputDir.split(path.sep);
         const lastPart = parts[parts.length - 1];
-        
+
         if (lastPart.startsWith('*')) {
             const newExtension = lastPart.substring(lastPart.indexOf('.'));
             targetFileName = path.basename(fileName, ext) + newExtension;
         } else {
             console.warn(`Complex output pattern '${options.outputDir}' might not be fully supported for renaming. Using original filename.`);
         }
-        
+
         const baseOutputDir = path.join(process.cwd(), ...parts.slice(0, parts.length - 1));
         outputFilePath = path.join(baseOutputDir, inputRelativePath);
         outputFilePath = path.join(path.dirname(outputFilePath), targetFileName);
@@ -153,7 +153,7 @@ async function processFile(filePath, options) {
 
     await fs.mkdir(path.dirname(outputFilePath), { recursive: true });
   }
-  
+
   result.outputFilePath = path.relative(process.cwd(), outputFilePath);
 
   const sourceMapTargetDir = options.sourceMapDir
@@ -219,28 +219,36 @@ async function processFile(filePath, options) {
       result.minifiedSize = Buffer.byteLength(minifiedContent, 'utf8');
       result.reduction = result.originalSize - result.minifiedSize;
       result.reductionPercent = result.originalSize > 0 ? (result.reduction / result.originalSize * 100) : 0;
+      const sizeReport = `(${formatBytes(result.originalSize)} -> ${formatBytes(result.minifiedSize)}, -${result.reductionPercent.toFixed(1)}%)`;
+
 
       if (!options.dryRun) {
         await fs.writeFile(outputFilePath, minifiedContent, 'utf8');
         result.status = 'Minified';
-        
+        console.log(`Minified: ${relativeFilePath} -> ${result.outputFilePath} ${sizeReport}`); // Log immediately
+
         if (options.sourceMap && sourceMapContent) {
           await fs.mkdir(sourceMapTargetDir, { recursive: true });
           await fs.writeFile(sourceMapActualFilePath, sourceMapContent, 'utf8');
           result.sourceMapGenerated = true;
+          console.log(`Source map generated: ${path.relative(process.cwd(), sourceMapActualFilePath)}`); // Log immediately
         }
       } else {
         result.status = '[DRY RUN] Minified';
+        console.log(`[DRY RUN] Would minify ${relativeFilePath} to ${result.outputFilePath} ${sizeReport}`); // Log immediately
+        if (options.sourceMap && sourceMapContent) {
+            console.log(`[DRY RUN]   + Would generate source map: ${path.relative(process.cwd(), sourceMapActualFilePath)}`); // Log immediately
+        }
       }
     } else {
-      if (options.verbose) console.log(`Skipping (no changes after minification): ${relativeFilePath}`);
+      if (options.verbose) console.log(`Skipping (no changes after minification): ${relativeFilePath}`); // Log immediately
       result.status = 'No Change';
     }
 
   } catch (minifyError) {
     result.status = 'Error';
     result.error = minifyError.message;
-    console.error(`\nError minifying ${relativeFilePath}:\n${minifyError.message}`); // Keep error logging for immediate feedback
+    console.error(`\nError minifying ${relativeFilePath}:\n${minifyError.message}`); // Log immediately
   }
   return result;
 }
@@ -299,6 +307,20 @@ function displayResultsTable(results) {
 
   console.log('\n--- Minification Summary ---');
 
+  // Helper to collapse paths for table display
+  const collapsePathForDisplay = (fullPath) => {
+    if (!fullPath || fullPath === 'N/A') return fullPath;
+    // Handle both Windows and Unix paths
+    const parts = fullPath.split(path.sep).filter(p => p !== '');
+    if (parts.length > 2) { // If there are more than two directory levels (e.g., dir1/dir2/file.js)
+        return `.../${parts[parts.length - 2]}/${parts[parts.length - 1]}`;
+    } else if (parts.length === 2) { // If there's one directory level (e.g., dir1/file.js)
+        return `${parts[0]}/${parts[1]}`; // Still show the directory and file
+    }
+    return fullPath; // For simple filenames or paths like 'file.js' or './file.js'
+  };
+
+
   // Calculate maximum column widths
   const headers = ['File', 'Status', 'Original Size', 'Minified Size', 'Reduction', 'Output File', 'Source Map'];
   let maxWidths = headers.map(header => header.length);
@@ -307,12 +329,38 @@ function displayResultsTable(results) {
     const originalSizeFormatted = formatBytes(r.originalSize);
     const minifiedSizeFormatted = formatBytes(r.minifiedSize);
     const reductionFormatted = r.reductionPercent > 0 ? `${formatBytes(r.reduction)} (-${r.reductionPercent.toFixed(1)}%)` : 'N/A';
-    const outputFileDisplay = r.outputFilePath || 'N/A';
-    const sourceMapDisplay = r.sourceMapGenerated ? 'Yes' : 'No';
     const statusDisplay = r.error ? `Error: ${r.error.split('\n')[0]}` : r.status; // Show first line of error
 
+    // Apply path collapsing for display
+    const fileDisplay = collapsePathForDisplay(r.filePath);
+    const outputFileDisplay = collapsePathForDisplay(r.outputFilePath || 'N/A');
+
+    let sourceMapDisplay = 'No';
+    if (r.sourceMapGenerated) {
+        // Construct the actual source map path from result and then collapse
+        // This assumes sourceMapActualFilePath was set correctly in processFile
+        // For simplicity here, we'll just collapse based on the knowledge that it's usually relative to cwd
+        // If not directly available in 'r', you might need to re-derive it or ensure it's stored.
+        // For now, let's assume `r.sourceMapPath` exists if generated and is the relative path.
+        // If `r.sourceMapActualFilePath` were part of the result, that would be ideal.
+        // For this example, we'll just indicate "Yes" for brevity or extend 'r' in `processFile`
+        // if you need the full path to collapse.
+        // Let's use a placeholder 'Yes' or if you decide to add `sourceMapActualFilePath` to result:
+        // sourceMapDisplay = collapsePathForDisplay(r.sourceMapActualFilePath);
+        sourceMapDisplay = 'Yes'; // Keeping it simple as per original 'Yes'/'No', but could be collapsed path if stored
+        // To collapse the source map path, you'd need the actual path returned in `result` from `processFile`.
+        // Assuming you might add `sourceMapPath: path.relative(process.cwd(), sourceMapActualFilePath)` to the result object in `processFile`.
+        if (r.sourceMapPath) { // If you add this to your result object in processFile
+            sourceMapDisplay = collapsePathForDisplay(r.sourceMapPath);
+        } else {
+             // If sourceMapPath isn't directly in `r`, we'd need to reconstruct or just show 'Yes'
+             sourceMapDisplay = 'Yes'; // Or handle more robustly
+        }
+    }
+
+
     return {
-      file: r.filePath,
+      file: fileDisplay,
       status: statusDisplay,
       originalSize: originalSizeFormatted,
       minifiedSize: minifiedSizeFormatted,
@@ -363,10 +411,13 @@ function displayResultsTable(results) {
 
 module.exports = {
   traverseAndMinifyDirectory: async (directory, options) => {
+    // Clear the console before starting if desired, to make real-time logs more prominent
+    // console.clear(); // Uncomment this line if you want to clear the console first
+
     const results = [];
     await traverseAndMinifyDirectory(directory, options, results);
-    displayResultsTable(results);
-    return results; // Return results for potential further processing
+    displayResultsTable(results); // The table will be displayed after all individual logs
+    return results;
   },
   processFile,
   isIgnored

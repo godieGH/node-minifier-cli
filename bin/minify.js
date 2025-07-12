@@ -31,7 +31,7 @@ async function loadIgnoreFile(ignoreFilePath) {
 program
   .version(pkgVersion)
   .name('minifier')
-  .description('Minifies .js, .css, and .html files recursively, with linting and dry-run capabilities.')
+  .description('Minifies .js, .css, and .html files recursively, with options.')
   .argument('<path>', 'The path to the directory or file to minify.')
   // --- ENHANCED OPTIONS ---
   .option('--no-verbose', 'Disable verbose logging for detailed output.', true)
