@@ -312,19 +312,29 @@ function displayResultsTable(results) {
   // Helper to collapse paths for table display
   const collapsePathForDisplay = (fullPath) => {
     if (!fullPath || fullPath === 'N/A') return fullPath;
-    // Handle both Windows and Unix paths
-    const parts = fullPath.split(path.sep).filter(p => p !== '');
-    if (parts.length > 2) { // If there are more than two directory levels (e.g., dir1/dir2/file.js)
-      return `.../${parts[parts.length - 2]}/${parts[parts.length - 1]}`;
-    } else if (parts.length === 2) { // If there's one directory level (e.g., dir1/file.js)
-      return `${parts[0]}/${parts[1]}`; // Still show the directory and file
+
+    // Normalize path separators to forward slashes for consistent splitting
+    const normalizedPath = fullPath.replace(/\\/g, '/');
+    const parts = normalizedPath.split('/').filter(p => p !== ''); // Filter out empty strings from consecutive slashes or leading/trailing ones
+
+    // If the path contains more than one part (meaning it has directories)
+    if (parts.length > 1) {
+      // If there are more than 2 parts (e.g., dir1/dir2/file.js), collapse with '...'
+      if (parts.length > 2) {
+        return `.../${parts[parts.length - 2]}/${parts[parts.length - 1]}`;
+      }
+      // If there are exactly 2 parts (e.g., dir1/file.js), display both
+      else { // parts.length === 2
+        return `${parts[0]}/${parts[1]}`;
+      }
     }
-    return fullPath; // For simple filenames or paths like 'file.js' or './file.js'
+    // If only one part (e.g., file.js or ./file.js after normalization), display as is
+    return fullPath;
   };
 
   const p = new Table({
     columns: [
-      { name: 'File', alignment: 'left', color: 'cyan', minLen: 15 }, // minLen helps ensure minimum width
+      { name: 'File', alignment: 'left', color: 'cyan', minLen: 15 },
       { name: 'Status', alignment: 'center', color: 'white', minLen: 10 },
       { name: 'Original Size', alignment: 'right', color: 'green', minLen: 10 },
       { name: 'Minified Size', alignment: 'right', color: 'green', minLen: 10 },
@@ -345,9 +355,8 @@ function displayResultsTable(results) {
 
     let sourceMapDisplay = 'No';
     if (r.sourceMapGenerated) {
-        // This assumes that `r` might contain a `sourceMapPath` if you added it
-        // to the `result` object in `processFile`. If not, it will default to 'Yes'.
-        // For accurate path display, ensure `processFile` adds `sourceMapPath` to `result`.
+        // Ensure sourceMapPath is added to your 'result' object in processFile for this to work best.
+        // Example: result.sourceMapPath = path.relative(process.cwd(), sourceMapActualFilePath);
         sourceMapDisplay = r.sourceMapPath ? collapsePathForDisplay(r.sourceMapPath) : 'Yes';
     }
 
@@ -362,15 +371,14 @@ function displayResultsTable(results) {
     });
   });
 
-  p.printTable(); // This prints the table to the console
+  p.printTable();
 
-  // Keep the summary line at the end, as it's separate from the table
   const totalOriginalSize = results.reduce((sum, r) => sum + r.originalSize, 0);
   const totalMinifiedSize = results.reduce((sum, r) => sum + r.minifiedSize, 0);
   const totalReduction = totalOriginalSize - totalMinifiedSize;
   const totalReductionPercent = totalOriginalSize > 0 ? (totalReduction / totalOriginalSize * 100).toFixed(1) : 0;
 
-  console.log('\n' + '-'.repeat(p.table.width)); // Use table's width for separator
+  console.log('\n' + '-'.repeat(p.table.width));
   console.log(`Total: ${formatBytes(totalOriginalSize)} -> ${formatBytes(totalMinifiedSize)} (Saved: ${formatBytes(totalReduction)}, -${totalReductionPercent}%)`);
   console.log('--- End Summary ---');
 }
